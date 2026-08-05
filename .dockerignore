@@ -1,0 +1,15 @@
+.git
+.gitignore
+.cursor
+.dockerignore
+Dockerfile
+docker-compose*.yml
+*.md
+tmp.log
+data/
+configs/*.yaml
+!configs/camwatch.example.yaml
+third_party/
+**/*_test.go
+*.test
+*.out

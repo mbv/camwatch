@@ -1,0 +1,51 @@
+poll_interval: 45s
+# log_only: true     # poll + dedupe only (no MTP / Telegram)
+# mtp_protocol: true # concise MTP milestones (dial/login/bind/miss/RDT)
+# mtp_verbose: true  # full wire-level CHK/KCP/CNT/media dumps
+
+devices:
+  - did: "1234567890"
+    model: xiaomi.camera.c302n
+    region: de
+
+xiaomi:
+  sid: xiaomiio
+  # Prefer importing a HAR/session JSON (serviceToken + ssecurity):
+  session_file: ./data/session.json
+  # Or password login:
+  # username: you@example.com
+  # password: secret
+  # Or passToken refresh:
+  # user_id: "123456"
+  # pass_token: "..."
+
+clip:
+  duration_sec: 20
+  out_dir: ./data/clips
+  ffmpeg: ffmpeg
+
+telegram:
+  # Sourced from the environment (backed by a gitignored .env — see .env.example)
+  # instead of hardcoded here, so a live bot token / api_hash can never end up
+  # committed via this tracked file.
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+  # Interactive browse + request past clips (/timeline, inline buttons):
+  bot_enabled: true
+  # Private DMs to the bot are allowed by default (notify still uses chat_id).
+  # allow_dm: true
+  # allowed_chat_ids: ["123456789"]
+
+  # Optional: publish camera live into a group/channel voice chat (ntgcalls via
+  # PyTgCalls sidecar). Bot API cannot join VCs — needs a user MTProto session.
+  # live:
+  #   enabled: true
+  #   api_id: ${TELEGRAM_API_ID}
+  #   api_hash: "${TELEGRAM_API_HASH}"
+  #   session_file: ./data/tg_user.session   # from scripts/tg_live_login.py
+  #   # chat_id: "${TELEGRAM_CHAT_ID}"       # default = telegram.chat_id
+  #   python: python3
+  #   sidecar: ./scripts/tg_live_sidecar.py
+
+store:
+  sqlite: ./data/camwatch.db

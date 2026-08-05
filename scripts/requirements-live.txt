@@ -1,0 +1,6 @@
+# Python deps for Telegram live voice-chat publish (ntgcalls via PyTgCalls).
+# kurigram is a maintained Pyrogram fork (same import path) that exports
+# GroupcallForbidden required by py-tgcalls >= 2.3.
+py-tgcalls>=2.1.0
+kurigram>=2.2.0
+tgcrypto>=1.2.0

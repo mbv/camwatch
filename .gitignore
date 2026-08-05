@@ -1,0 +1,13 @@
+/data/*
+!/data/.gitignore
+*.mp4
+*.h264
+*.es
+*.hevc
+*.h265
+configs/camwatch.yaml
+configs/camwatch.docker.yaml
+/third_party/
+.env
+.DS_Store
+scripts/__pycache__/*

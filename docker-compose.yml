@@ -1,0 +1,18 @@
+services:
+  camwatch:
+    build: .
+    container_name: camwatch
+    restart: unless-stopped
+    # Linux: host network helps MTP UDP/P2P. Docker Desktop (macOS) ignores host
+    # networking; remove network_mode and rely on cloud ssAddrs if needed.
+    network_mode: host
+    environment:
+      TZ: UTC
+      # Secrets — set in a gitignored .env alongside this file (see .env.example).
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set in .env}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set in .env}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?set in .env}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?set in .env}
+    volumes:
+      - ./configs/camwatch.docker.yaml:/app/configs/camwatch.yaml:ro
+      - ./data:/app/data
