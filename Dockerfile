@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- Go build: only Go sources → config/script/requirements changes do not rebuild ---
-FROM golang:1.24-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
