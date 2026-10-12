@@ -20,7 +20,12 @@ xiaomi:
   # pass_token: "..."
 
 clip:
-  duration_sec: 20
+  duration_sec: 20        # minimum clip length
+  # Cloud events only mark the start. With full_event (default true) the clip
+  # runs to the end of the camera's SD recording for that event, up to
+  # max_duration_sec (guards cameras that record continuously).
+  full_event: true
+  max_duration_sec: 180
   out_dir: ./data/clips
   ffmpeg: ffmpeg
 

@@ -87,6 +87,11 @@ type PlaybackRequest struct {
 	PreRollSec   int   // seconds before event to include in the seek (default 8)
 	TrimStartSec int   // filled by miss after resolution; recorder trims this many seconds
 	CaptureSec   int   // filled by miss: stream read budget (pre-roll+duration+slack)
+	// FullEvent asks miss to extend DurationSec to the end of the camera's
+	// contiguous SD recording that starts at the event (cloud events carry no
+	// end time), bounded by MaxDurationSec. DurationSec stays the floor.
+	FullEvent      bool
+	MaxDurationSec int
 }
 
 // ClipWindow is a user-chosen amount of context to include around an event

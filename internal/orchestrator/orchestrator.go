@@ -20,6 +20,8 @@ type Config struct {
 	PollInterval time.Duration
 	LogOnly      bool
 	ClipDuration int
+	// MaxClipSec is the longest full-event clip; it only lengthens the capture timeout.
+	MaxClipSec int
 	Devices      []domain.Device
 }
 
@@ -421,6 +423,10 @@ func (o *Orchestrator) RequestClip(ctx context.Context, device domain.Device, ev
 	// an unscaled timeout here would fail closed as a truncated clip instead
 	// of a visible error.
 	timeout := 150*time.Second + 2*time.Duration(win.BeforeSec+win.AfterSec)*time.Second
+	if win.BeforeSec == 0 && win.AfterSec == 0 {
+		// Playback streams in real time, so a full-event clip takes its length.
+		timeout += time.Duration(o.cfg.MaxClipSec) * time.Second
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

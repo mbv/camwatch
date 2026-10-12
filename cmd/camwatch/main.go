@@ -76,8 +76,10 @@ func main() {
 	}
 
 	rec := recorder.New(recorder.Config{
-		DurationSec: cfg.Clip.DurationSec,
-		FFmpeg:      cfg.Clip.FFmpeg,
+		DurationSec:    cfg.Clip.DurationSec,
+		FullEvent:      cfg.Clip.FullEventEnabled(),
+		MaxDurationSec: cfg.Clip.MaxDurationSec,
+		FFmpeg:         cfg.Clip.FFmpeg,
 		Clips:       clips,
 	})
 	sessions := miss.NewSessionFactory(apiC, store)
@@ -92,6 +94,7 @@ func main() {
 			PollInterval: cfg.PollInterval,
 			LogOnly:      cfg.LogOnly,
 			ClipDuration: cfg.Clip.DurationSec,
+			MaxClipSec:   fullEventMax(cfg),
 			Devices:      devices,
 		},
 		authP,
@@ -209,4 +212,12 @@ func resolveSidecar(sidecar, cfgPath string) string {
 		return abs
 	}
 	return sidecar
+}
+
+// fullEventMax is the longest auto clip, used to size the capture timeout.
+func fullEventMax(cfg *config.Config) int {
+	if cfg.Clip.FullEventEnabled() {
+		return cfg.Clip.MaxDurationSec
+	}
+	return 0
 }

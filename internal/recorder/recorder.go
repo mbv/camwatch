@@ -18,7 +18,12 @@ import (
 type Config struct {
 	DurationSec int
 	PreRollSec  int
-	FFmpeg      string
+	// FullEvent records until the camera's recording for the event ends (up to
+	// MaxDurationSec) instead of a fixed DurationSec. Ignored when the caller
+	// picked an explicit window.
+	FullEvent      bool
+	MaxDurationSec int
+	FFmpeg         string
 	Clips       ports.ClipStore
 }
 
@@ -32,6 +37,9 @@ func New(cfg Config) *Recorder {
 	}
 	if cfg.PreRollSec <= 0 {
 		cfg.PreRollSec = domain.DefaultPreRollSec
+	}
+	if cfg.FullEvent && cfg.MaxDurationSec < cfg.DurationSec {
+		cfg.MaxDurationSec = cfg.DurationSec
 	}
 	if cfg.FFmpeg == "" {
 		cfg.FFmpeg = "ffmpeg"
@@ -60,6 +68,9 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 		// the small keyframe-sync default. No new PlaybackRequest fields needed.
 		req.PreRollSec = win.BeforeSec
 		req.DurationSec = win.BeforeSec + win.AfterSec
+	} else if r.cfg.FullEvent {
+		req.FullEvent = true
+		req.MaxDurationSec = r.cfg.MaxDurationSec
 	}
 
 	rc, err := conn.DownloadPlayback(ctx, req)
@@ -111,7 +122,11 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 	}
 
 	_ = os.Remove(outMP4)
-	if err := remuxToMP4(ctx, r.cfg.FFmpeg, rawPath, outMP4, trim, finalDur); err != nil {
+	var fps float64
+	if m, ok := conn.(streamFPSer); ok {
+		fps = m.StreamFPS()
+	}
+	if err := remuxToMP4(ctx, r.cfg.FFmpeg, rawPath, outMP4, trim, finalDur, fps); err != nil {
 		return domain.Clip{}, fmt.Errorf("recorder: remux_failed: %w", err)
 	}
 	_ = os.Remove(rawPath)
@@ -203,10 +218,27 @@ func annexBFormat(path string) (string, error) {
 	return "h264", nil
 }
 
-func buildRemuxBaseArgs(format, in string, trimStartSec, durationSec int) []string {
-	// Invent CFR pts at 15 fps; -ss/-t after -i trim post-decode so the
-	// pre-roll+sync buffer still contains the event before the cut.
-	args := []string{"-y", "-loglevel", "error", "-fflags", "+genpts", "-f", format, "-r", "15", "-i", in}
+// defaultFPS labels the raw stream when the camera's real rate is unknown.
+const defaultFPS = 15.0
+
+// streamFPSer is implemented by conns that can measure the real frame rate
+// from the camera's frame timestamps (miss.Conn).
+type streamFPSer interface{ StreamFPS() float64 }
+
+// sanitizeFPS rejects missing or implausible measured rates.
+func sanitizeFPS(fps float64) float64 {
+	if fps < 1 || fps > 60 {
+		return defaultFPS
+	}
+	return fps
+}
+
+func buildRemuxBaseArgs(format, in string, trimStartSec, durationSec int, fps float64) []string {
+	// Invent CFR pts at the measured fps (the raw stream has none; a wrong
+	// rate makes the clip play too fast/slow). -ss/-t after -i trim
+	// post-decode so the pre-roll+sync buffer still contains the event.
+	rate := strconv.FormatFloat(sanitizeFPS(fps), 'f', 3, 64)
+	args := []string{"-y", "-loglevel", "error", "-fflags", "+genpts", "-f", format, "-r", rate, "-i", in}
 	if trimStartSec > 0 {
 		args = append(args, "-ss", strconv.Itoa(trimStartSec))
 	}
@@ -216,7 +248,7 @@ func buildRemuxBaseArgs(format, in string, trimStartSec, durationSec int) []stri
 	return args
 }
 
-func remuxToMP4(ctx context.Context, ffmpeg, in, out string, trimStartSec, durationSec int) error {
+func remuxToMP4(ctx context.Context, ffmpeg, in, out string, trimStartSec, durationSec int, fps float64) error {
 	format, err := annexBFormat(in)
 	if err != nil {
 		return err
@@ -231,7 +263,7 @@ func remuxToMP4(ctx context.Context, ffmpeg, in, out string, trimStartSec, durat
 	var last error
 	for _, format := range orders {
 		var attempts [][]string
-		inArgs := buildRemuxBaseArgs(format, in, trimStartSec, durationSec)
+		inArgs := buildRemuxBaseArgs(format, in, trimStartSec, durationSec, fps)
 		x264 := []string{
 			"-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
 			"-g", "30", "-keyint_min", "30", "-bf", "0",

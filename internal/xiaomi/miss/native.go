@@ -336,3 +336,39 @@ func PlanPaddedSeek(segs []mtp.TimelineSeg, eventUnix int64, before, after int) 
 	// fail the same way it did inside that loop, so this is a no-op then.
 	return appendReachBackFallback(segs, plans, eventUnix, before, finalDur), nil
 }
+
+// ExtendPlanToRecordingEnd lengthens plan.FinalDurSec so the clip runs from the
+// event to the end of the contiguous SD recording it belongs to. The cloud
+// event is only a start marker (alarmStart, no end/duration), but the camera's
+// recording is event-triggered, so a run of back-to-back TimeItems ends where
+// the motion recording ends. One 0x10d keeps streaming across item boundaries
+// (camera auto-advance, see PlanPaddedSeek), so only the capture budget grows.
+//
+// The result is never shorter than plan.FinalDurSec and never longer than
+// maxSec after the event (continuous-recording cameras would otherwise chain
+// forever). maxSec <= 0 leaves the plan untouched.
+func ExtendPlanToRecordingEnd(segs []mtp.TimelineSeg, plan SeekPlan, maxSec int) SeekPlan {
+	if maxSec <= 0 || plan.EventUnix <= 0 {
+		return plan
+	}
+	limit := plan.EventUnix + int64(maxSec)
+	end := plan.SessionID + int64(plan.ItemDurSec)
+	// A covering item can itself extend past the event; walk its successors.
+	for end < limit {
+		next, ok := mtp.FollowingSegment(segs, end, contiguityTolSec)
+		if !ok {
+			break
+		}
+		end = next.StartUnix + int64(next.DurationSec)
+	}
+	if end > limit {
+		end = limit
+	}
+	full := int(end - plan.EventUnix)
+	if full <= plan.FinalDurSec {
+		return plan
+	}
+	plan.FinalDurSec = full
+	plan.CaptureSec = plan.TrimStartSec + full + SyncSlackSec
+	return plan
+}

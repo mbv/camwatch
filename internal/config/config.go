@@ -44,7 +44,17 @@ type ClipCfg struct {
 	DurationSec int    `yaml:"duration_sec"`
 	OutDir      string `yaml:"out_dir"`
 	FFmpeg      string `yaml:"ffmpeg"` // path; default "ffmpeg"
+	// FullEvent: record to the end of the camera's recording for the event
+	// (cloud events have no end time). duration_sec becomes the minimum.
+	// Nil/omitted => true.
+	FullEvent *bool `yaml:"full_event"`
+	// MaxDurationSec caps a full-event clip (default 180). Guards cameras
+	// that record continuously, where the recording never "ends".
+	MaxDurationSec int `yaml:"max_duration_sec"`
 }
+
+// FullEventEnabled reports whether full-event recording is on (default true).
+func (c ClipCfg) FullEventEnabled() bool { return c.FullEvent == nil || *c.FullEvent }
 
 type TelegramCfg struct {
 	BotToken       string   `yaml:"bot_token"`
@@ -131,6 +141,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Clip.DurationSec <= 0 {
 		c.Clip.DurationSec = 20
+	}
+	if c.Clip.MaxDurationSec <= 0 {
+		c.Clip.MaxDurationSec = 180
 	}
 	if c.Clip.OutDir == "" {
 		c.Clip.OutDir = "./data/clips"

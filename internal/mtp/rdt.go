@@ -882,6 +882,40 @@ func PrecedingSegment(segs []TimelineSeg, startUnix int64, tolSec int) (Timeline
 	return segs[bestIdx], true
 }
 
+// FollowingSegment finds the segment that continues a recording ending at
+// endUnix: one starting within tolSec of it (before or after) and ending later.
+// Among candidates prefer the one reaching furthest (so an overlapping long
+// span wins over a short one), tie-broken by duration closest to 60s.
+func FollowingSegment(segs []TimelineSeg, endUnix int64, tolSec int) (TimelineSeg, bool) {
+	if tolSec < 0 {
+		tolSec = 0
+	}
+	bestIdx := -1
+	var bestEnd int64
+	bestScore := int(^uint(0) >> 1)
+	for i, s := range segs {
+		if s.DurationSec <= 0 {
+			continue
+		}
+		gap := s.StartUnix - endUnix
+		if gap < -int64(tolSec) || gap > int64(tolSec) {
+			continue
+		}
+		end := s.StartUnix + int64(s.DurationSec)
+		if end <= endUnix {
+			continue
+		}
+		score := absInt(s.DurationSec - 60)
+		if end > bestEnd || (end == bestEnd && score < bestScore) {
+			bestIdx, bestEnd, bestScore = i, end, score
+		}
+	}
+	if bestIdx < 0 {
+		return TimelineSeg{}, false
+	}
+	return segs[bestIdx], true
+}
+
 // LookupTimelineNear finds a segment when exact cover fails (SD index lag).
 // Accepts a prior segment with start <= event and event within
 // start+duration+skewSec (or within skewSec past the published end).

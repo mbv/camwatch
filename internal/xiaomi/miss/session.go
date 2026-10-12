@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"camwatch/internal/domain"
@@ -152,7 +154,15 @@ type Conn struct {
 	timeline   []mtp.TimelineSeg
 	timelineAt time.Time
 	timelines  ports.TimelineStore
+	// streamFPS holds math.Float64bits of the frame rate measured from the
+	// packet-header timestamps of the last playback stream (0 = unknown).
+	streamFPS atomic.Uint64
 }
+
+// StreamFPS reports the real frame rate of the last playback stream, derived
+// from the camera's own frame timestamps. The raw Annex-B stream carries no
+// timing, so the recorder needs this to label frames correctly (0 = unknown).
+func (c *Conn) StreamFPS() float64 { return math.Float64frombits(c.streamFPS.Load()) }
 
 func (c *Conn) Close() error { return c.conn.Close() }
 
@@ -283,8 +293,14 @@ func (c *Conn) DownloadPlayback(ctx context.Context, req *domain.PlaybackRequest
 // or idle/context end. Recorder owns post-sync trim timing.
 func (c *Conn) openPlaybackStream(ctx context.Context, captureSec int) io.ReadCloser {
 	pr, pw := io.Pipe()
+	c.streamFPS.Store(0)
 	go func() {
 		defer pw.Close()
+		// Header bytes 16..24 are a per-frame timestamp in ms. It restarts at
+		// each SD file, so only count small forward steps between neighbours.
+		var prevTS uint64
+		var haveTS bool
+		var stepMs, steps int64
 		deadline := time.Now().Add(time.Duration(captureSec+15) * time.Second)
 		_ = c.conn.SetDeadline(deadline)
 		var wrote int
@@ -328,6 +344,15 @@ func (c *Conn) openPlaybackStream(ctx context.Context, captureSec int) io.ReadCl
 			if _, err := pw.Write(ab); err != nil {
 				return
 			}
+			ts := binary.LittleEndian.Uint64(hdr[16:])
+			if haveTS && ts > prevTS && ts-prevTS < 2000 {
+				stepMs += int64(ts - prevTS)
+				steps++
+				if steps >= 10 {
+					c.streamFPS.Store(math.Float64bits(float64(steps) * 1000 / float64(stepMs)))
+				}
+			}
+			prevTS, haveTS = ts, true
 			if started.IsZero() {
 				started = time.Now()
 			}
@@ -490,6 +515,16 @@ func (c *Conn) resolveSeekPlan(ctx context.Context, req domain.PlaybackRequest) 
 		plans, err = selectPlans(c.timeline, req.EventUnix, req.PreRollSec, req.DurationSec)
 		if err != nil {
 			return nil, err
+		}
+	}
+	if req.FullEvent {
+		for i := range plans {
+			ext := ExtendPlanToRecordingEnd(c.timeline, plans[i], req.MaxDurationSec)
+			if ext.FinalDurSec != plans[i].FinalDurSec {
+				mtp.Logp("miss: full event sessionid=%d clip %ds -> %ds (max %ds)\n",
+					ext.SessionID, plans[i].FinalDurSec, ext.FinalDurSec, req.MaxDurationSec)
+			}
+			plans[i] = ext
 		}
 	}
 	return plans, nil
