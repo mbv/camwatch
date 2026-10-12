@@ -75,8 +75,18 @@ func (p *Provider) SaveSession(ctx context.Context, t domain.TokenBundle) error 
 	return os.WriteFile(p.sessionFile, b, 0o600)
 }
 
-func (p *Provider) Login(ctx context.Context, user, pass string) (domain.TokenBundle, error) {
+// newCloud builds a Cloud that reuses the persisted device id, so passport
+// sees the same "device" across logins and passToken stays valid for it.
+func (p *Provider) newCloud(ctx context.Context) *Cloud {
 	c := NewCloud(p.sid)
+	if t, err := p.LoadSession(ctx); err == nil {
+		c.SetDeviceID(t.DeviceID)
+	}
+	return c
+}
+
+func (p *Provider) Login(ctx context.Context, user, pass string) (domain.TokenBundle, error) {
+	c := p.newCloud(ctx)
 	if err := c.Login(user, pass); err != nil {
 		return domain.TokenBundle{}, err
 	}
@@ -90,6 +100,7 @@ func (p *Provider) Login(ctx context.Context, user, pass string) (domain.TokenBu
 
 func (p *Provider) Refresh(ctx context.Context, t domain.TokenBundle) (domain.TokenBundle, error) {
 	c := NewCloud(p.sid)
+	c.SetDeviceID(t.DeviceID)
 	if t.PassToken != "" && t.UserID != "" && !strings.HasPrefix(strings.TrimSpace(t.PassToken), "{") {
 		if err := c.LoginWithToken(t.UserID, t.PassToken); err != nil {
 			return domain.TokenBundle{}, err
@@ -177,6 +188,7 @@ func BundleFromCloud(c *Cloud) domain.TokenBundle {
 		Ssecurity:    sec,
 		Cookies:      cookies,
 		SID:          c.SID(),
+		DeviceID:     c.DeviceID(),
 		UpdatedAt:    time.Now().UTC(),
 	}
 }
@@ -186,6 +198,7 @@ func ApplyBundle(c *Cloud, t domain.TokenBundle) error {
 	if err != nil {
 		return err
 	}
+	c.SetDeviceID(t.DeviceID)
 	c.userID = t.UserID
 	c.passToken = t.PassToken
 	c.ssecurity = sec

@@ -221,6 +221,43 @@ func (c *Client) SendFile(ctx context.Context, chatID, path, caption string) err
 	return nil
 }
 
+// SendPhoto uploads an in-memory image (e.g. the Xiaomi login captcha).
+func (c *Client) SendPhoto(ctx context.Context, chatID string, img []byte, caption string) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", chatID)
+	_ = w.WriteField("caption", caption)
+	part, err := w.CreateFormFile("photo", "captcha.jpg")
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(img); err != nil {
+		return err
+	}
+	_ = w.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL("sendPhoto"), &buf)
+	if err != nil {
+		return redactToken(err, c.BotToken)
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	res, err := c.Upload.Do(req)
+	if err != nil {
+		return redactToken(err, c.BotToken)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	var resp struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	_ = json.Unmarshal(body, &resp)
+	if res.StatusCode != 200 || !resp.OK {
+		return fmt.Errorf("telegram sendPhoto: %s: %s", res.Status, resp.Description)
+	}
+	return nil
+}
+
 // probeVideoWH returns pixel size and duration seconds via ffprobe (best-effort).
 func probeVideoWH(path string) (width, height, durationSec int) {
 	cmd := exec.Command("ffprobe", "-v", "error",

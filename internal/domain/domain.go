@@ -64,6 +64,7 @@ type TokenBundle struct {
 	Ssecurity    string    `json:"ssecurity"` // base64
 	Cookies      string    `json:"cookies,omitempty"`
 	SID          string    `json:"sid,omitempty"`
+	DeviceID     string    `json:"deviceId,omitempty"`
 	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
 }
 

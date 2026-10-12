@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 )
 
 type Cloud struct {
@@ -30,6 +31,10 @@ type Cloud struct {
 
 	userID    string
 	passToken string
+	// deviceID is the stable "android_<uuid>" the Mi Home app sends as the
+	// deviceId cookie on every passport call. passToken is bound to it, so a
+	// new random value per login forces a fresh verification challenge.
+	deviceID string
 
 	auth map[string]string
 }
@@ -38,6 +43,21 @@ func NewCloud(sid string) *Cloud {
 	return &Cloud{
 		client: &http.Client{Timeout: 15 * time.Second},
 		sid:    sid,
+	}
+}
+
+// DeviceID returns the passport device id, generating one on first use.
+func (c *Cloud) DeviceID() string {
+	if c.deviceID == "" {
+		c.deviceID = "android_" + uuid.NewString()
+	}
+	return c.deviceID
+}
+
+// SetDeviceID installs a previously persisted device id (no-op when empty).
+func (c *Cloud) SetDeviceID(id string) {
+	if id != "" {
+		c.deviceID = id
 	}
 }
 
@@ -68,7 +88,7 @@ func (c *Cloud) Login(username, password string) error {
 		"qs":       {v1.Qs},
 		"user":     {username},
 	}
-	cookies := "deviceId=" + randString(16)
+	cookies := "deviceId=" + c.DeviceID()
 
 	// login after captcha
 	if c.auth != nil && c.auth["captcha_code"] != "" {
@@ -149,7 +169,7 @@ func (c *Cloud) LoginWithVerify(ticket string) error {
 	req := Request{
 		Method:     "POST",
 		URL:        "https://account.xiaomi.com/identity/auth/verify" + c.verifyName(),
-		RawParams:  "_flag" + c.auth["flag"] + "&ticket=" + ticket + "&trust=false&_json=true",
+		RawParams:  "_flag=" + c.auth["flag"] + "&ticket=" + ticket + "&trust=false&_json=true",
 		RawCookies: "identity_session=" + c.auth["identity_session"],
 	}.Encode()
 
@@ -371,7 +391,7 @@ func (c *Cloud) LoginWithToken(userID, passToken string) error {
 		return err
 	}
 
-	req.Header.Set("Cookie", fmt.Sprintf("userId=%s; passToken=%s", userID, passToken))
+	req.Header.Set("Cookie", fmt.Sprintf("userId=%s; passToken=%s; deviceId=%s", userID, passToken, c.DeviceID()))
 
 	res, err := c.client.Do(req)
 	if err != nil {
@@ -387,6 +407,10 @@ func (c *Cloud) LoginWithToken(userID, passToken string) error {
 		return err
 	}
 
+	if v1.Location == "" {
+		return errors.New("xiaomi: passToken rejected (no location); log in again")
+	}
+	c.userID = userID
 	c.ssecurity = v1.Ssecurity
 	c.passToken = v1.PassToken
 

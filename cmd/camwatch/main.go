@@ -26,6 +26,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "login" {
+		os.Exit(runLogin(os.Args[2:]))
+	}
 	cfgPath := flag.String("config", "configs/camwatch.example.yaml", "path to config yaml")
 	flag.Parse()
 
@@ -149,6 +152,12 @@ func main() {
 		)
 		if cfg.Telegram.LiveConfigured() && !cfg.LogOnly {
 			bot.Live = orch
+		}
+		if cfg.Xiaomi.Username != "" && cfg.Xiaomi.Password != "" {
+			bot.Login = func(ctx context.Context, pr auth.Prompter) error {
+				_, err := authP.LoginInteractive(ctx, cfg.Xiaomi.Username, cfg.Xiaomi.Password, pr)
+				return err
+			}
 		}
 		g.Go(func() error {
 			err := bot.Run(ctx)

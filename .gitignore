@@ -1,4 +1,6 @@
+/.idea
 /data/*
+/dump
 !/data/.gitignore
 *.mp4
 *.h264

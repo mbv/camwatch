@@ -13,6 +13,10 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set in .env}
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:?set in .env}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?set in .env}
+      # Optional: enables `/login` in a private chat with the bot (and
+      # `camwatch login`) to renew the Xiaomi session; captcha/2FA go to Telegram.
+      XIAOMI_USERNAME: ${XIAOMI_USERNAME:-}
+      XIAOMI_PASSWORD: ${XIAOMI_PASSWORD:-}
     volumes:
       - ./configs/camwatch.docker.yaml:/app/configs/camwatch.yaml:ro
       - ./data:/app/data

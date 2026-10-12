@@ -174,6 +174,15 @@ func (o *Orchestrator) pollOnce(ctx context.Context) {
 					"fileId", ev.FileID, "age", age.Round(time.Second))
 				continue
 			}
+			// One download per camera at a time: don't claim/spawn the rest of
+			// the backlog just to have each goroutine bounce off ErrBusy.
+			o.mu.Lock()
+			busy := o.inflight[dev.DID]
+			o.mu.Unlock()
+			if busy {
+				o.log.Debug("camera busy; leaving remaining events for next poll", "did", dev.DID)
+				break
+			}
 			if !o.claimEvent(key) {
 				continue
 			}
@@ -184,6 +193,9 @@ func (o *Orchestrator) pollOnce(ctx context.Context) {
 				continue
 			}
 			go o.handleNewEvent(ctx, dev, ev)
+			// The goroutine hasn't taken the inflight slot yet; stop here so
+			// the rest of the backlog waits for the next poll.
+			break
 		}
 	}
 }
@@ -417,6 +429,18 @@ func (o *Orchestrator) RequestClip(ctx context.Context, device domain.Device, ev
 		return domain.Clip{}, err
 	}
 	conn, _, err := o.borrowP2P(ctx, device, tokens)
+	if err != nil && isAuthErr(err) {
+		// miss_get_vendor 401: the cached session is dead. EnsureValid never
+		// revalidates it, so without this every capture fails until restart.
+		o.log.Warn("p2p open unauthorized, refreshing auth", "did", device.DID, "err", err)
+		o.auth.Invalidate()
+		if t, rerr := o.auth.Refresh(ctx, mustBundle(o.auth, ctx)); rerr == nil {
+			tokens = t
+			conn, _, err = o.borrowP2P(ctx, device, tokens)
+		} else {
+			o.log.Error("auth refresh after 401", "err", rerr)
+		}
+	}
 	if err != nil {
 		return domain.Clip{}, fmt.Errorf("p2p open: %w", err)
 	}
@@ -439,6 +463,14 @@ func (o *Orchestrator) RequestClip(ctx context.Context, device domain.Device, ev
 		o.log.Warn("capture partial", "err", err, "path", clip.Path)
 	}
 	return clip, nil
+}
+
+func isAuthErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "401") || strings.Contains(msg, "Unauthorized")
 }
 
 func mediaPathDead(err error) bool {

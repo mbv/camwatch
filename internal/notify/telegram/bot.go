@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"camwatch/internal/xiaomi/auth"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"camwatch/internal/domain"
@@ -17,9 +19,9 @@ import (
 )
 
 const (
-	pageSize     = 10
-	pickTTL      = 24 * time.Hour
-	longPollSec  = 25
+	pageSize    = 10
+	pickTTL     = 24 * time.Hour
+	longPollSec = 25
 )
 
 // DeviceSource exposes configured cameras (orchestrator).
@@ -37,7 +39,14 @@ type Bot struct {
 	Log            *slog.Logger
 	AllowDM        bool
 	AllowedChatIDs []string
-	offset         int64
+	// Login runs a Xiaomi password login, asking pr for captcha / 2FA codes.
+	// nil disables /login.
+	Login func(ctx context.Context, pr auth.Prompter) error
+
+	offset  int64
+	mu      sync.Mutex
+	waiters map[string]chan string // chatID -> pending login reply
+	loginOn bool
 }
 
 func NewBot(
@@ -62,7 +71,6 @@ func NewBot(
 		AllowedChatIDs: append([]string(nil), allowedChatIDs...),
 	}
 }
-
 
 func (b *Bot) Run(ctx context.Context) error {
 	b.Log.Info("telegram bot started", "chat_id", b.Client.ChatID)
@@ -175,6 +183,11 @@ func (b *Bot) handleUpdate(ctx context.Context, u update) {
 	if len(parts) == 0 {
 		return
 	}
+	if !strings.HasPrefix(parts[0], "/") || parts[0] == "/cancel" {
+		if b.deliverReply(chatID, text) {
+			return
+		}
+	}
 	cmd := strings.Split(parts[0], "@")[0]
 	args := parts[1:]
 	b.Log.Info("bot command", "cmd", cmd, "chat_id", chatID)
@@ -191,11 +204,12 @@ func (b *Bot) handleUpdate(ctx context.Context, u update) {
 		b.cmdLiveStop(ctx, chatID)
 	case "/live_test":
 		b.cmdLiveTest(ctx, chatID)
+	case "/login":
+		b.cmdLogin(ctx, chatID)
 	default:
 		b.send(ctx, chatID, "Unknown command. Try /help", nil)
 	}
 }
-
 
 func helpText() string {
 	return `<b>camwatch</b>
@@ -207,6 +221,7 @@ func helpText() string {
 /live [did] — publish camera live into group voice chat
 /live_test — spike: play sample MP4 into voice chat (no camera)
 /live_stop — stop live publish
+/login — re-login to Xiaomi (private chat only; captcha/code asked here)
 Tap an event to download the clip.`
 }
 
