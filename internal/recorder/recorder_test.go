@@ -38,3 +38,23 @@ func TestRemuxUsesMeasuredFPS(t *testing.T) {
 		}
 	}
 }
+
+func TestTrimFromFrameTime(t *testing.T) {
+	const ev = 1000
+	cases := []struct {
+		first   int64
+		planned int
+		want    int
+	}{
+		{ev - 8, 8, 8},   // stream starts 8s before the event: cut the 8s
+		{ev - 40, 8, 40}, // started 40s early: cut 40s
+		{ev + 5, 8, 0},   // started after the event: nothing to cut
+		{0, 8, 8},        // unknown frame time: keep the plan
+		{ev - 900, 8, 8}, // implausible: keep the plan
+	}
+	for _, c := range cases {
+		if got := trimFromFrameTime(ev, c.first, c.planned); got != c.want {
+			t.Fatalf("first=%d: got %d want %d", c.first, got, c.want)
+		}
+	}
+}

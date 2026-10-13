@@ -33,6 +33,13 @@ const (
 	codecH265 = 5
 	hdrSize   = 32
 
+	// offsetSlackSec tolerates rounding between the index offset and the
+	// duration the camera reports in 0x10e.
+	offsetSlackSec = 3
+	// staleWallSlackSec: frames older than sessionid by more than this are
+	// leftovers of an earlier playback.
+	staleWallSlackSec = 2
+
 	// playbackResTimeout bounds the wait for 0x10e after 0x10d/0x10f. Real
 	// captures (x/mtp-native.pcap, 5 successful round trips) show the camera
 	// replies in 0.65-0.95s; a 15s wait mostly meant an already-doomed request
@@ -157,7 +164,14 @@ type Conn struct {
 	// streamFPS holds math.Float64bits of the frame rate measured from the
 	// packet-header timestamps of the last playback stream (0 = unknown).
 	streamFPS atomic.Uint64
+	// firstWall is the wall-clock unix second (header bytes 24..28) of the first
+	// accepted frame of the last playback stream, i.e. the camera OSD time.
+	firstWall atomic.Int64
 }
+
+// FirstFrameUnix is the camera-clock second of the first frame of the last
+// playback stream (0 = unknown) — what the on-screen timestamp shows.
+func (c *Conn) FirstFrameUnix() int64 { return c.firstWall.Load() }
 
 // StreamFPS reports the real frame rate of the last playback stream, derived
 // from the camera's own frame timestamps. The raw Annex-B stream carries no
@@ -272,6 +286,15 @@ func (c *Conn) DownloadPlayback(ctx context.Context, req *domain.PlaybackRequest
 			return nil, fmt.Errorf("miss: playback_rejected: status=%q sessionid=%d", resp.Status, plan.SessionID)
 		}
 		mtp.Logp("miss: 0x10e filefound sessionid=%d duration=%d\n", resp.ID, resp.Duration)
+		// The camera ignores an offset past the real file's end and plays from
+		// its start, i.e. from the wrong moment. Try the next candidate.
+		if resp.Duration > 0 && plan.OffsetSec > resp.Duration+offsetSlackSec {
+			_ = c.conn.WriteMediaCommand(cmdVideoStop, []byte(`{}`))
+			lastErr = fmt.Errorf("miss: playback_rejected: offset=%d beyond real file duration=%d sessionid=%d",
+				plan.OffsetSec, resp.Duration, plan.SessionID)
+			mtp.Logp("miss: %v; trying next candidate\n", lastErr)
+			continue
+		}
 
 		req.SessionID = plan.SessionID
 		req.StartTime = plan.SessionID
@@ -284,16 +307,17 @@ func (c *Conn) DownloadPlayback(ctx context.Context, req *domain.PlaybackRequest
 		if captureSec <= 0 {
 			captureSec = plan.FinalDurSec + SyncSlackSec
 		}
-		return c.openPlaybackStream(ctx, captureSec), nil
+		return c.openPlaybackStream(ctx, captureSec, plan.SessionID), nil
 	}
 	return nil, lastErr
 }
 
 // openPlaybackStream reads annex-B until captureSec of wall time after first frame
 // or idle/context end. Recorder owns post-sync trim timing.
-func (c *Conn) openPlaybackStream(ctx context.Context, captureSec int) io.ReadCloser {
+func (c *Conn) openPlaybackStream(ctx context.Context, captureSec int, sessionID int64) io.ReadCloser {
 	pr, pw := io.Pipe()
 	c.streamFPS.Store(0)
+	c.firstWall.Store(0)
 	go func() {
 		defer pw.Close()
 		// Header bytes 16..24 are a per-frame timestamp in ms. It restarts at
@@ -340,6 +364,19 @@ func (c *Conn) openPlaybackStream(ctx context.Context, captureSec int) io.ReadCl
 			ab := toAnnexB(payload)
 			if len(ab) == 0 {
 				continue
+			}
+			// Frames still in flight from a previous playback (the camera
+			// auto-advances through files) carry a wall time before the
+			// requested file; drop them instead of splicing them in front.
+			wall := int64(binary.LittleEndian.Uint32(hdr[24:]))
+			if wall > 1_500_000_000 && wall < sessionID-staleWallSlackSec && c.firstWall.Load() == 0 {
+				continue
+			}
+			// Publish the first frame's time BEFORE handing it to the reader:
+			// the recorder may sync on this very frame and read FirstFrameUnix
+			// as soon as Write returns.
+			if wall > 1_500_000_000 && c.firstWall.CompareAndSwap(0, wall) {
+				mtp.Logp("miss: first frame camera-time=%d requested sessionid=%d\n", wall, sessionID)
 			}
 			if _, err := pw.Write(ab); err != nil {
 				return

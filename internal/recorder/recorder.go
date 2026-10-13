@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +25,7 @@ type Config struct {
 	FullEvent      bool
 	MaxDurationSec int
 	FFmpeg         string
-	Clips       ports.ClipStore
+	Clips          ports.ClipStore
 }
 
 type Recorder struct {
@@ -88,6 +89,19 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 
 	// After sync, capture finalDur + remaining pre-roll (for ffmpeg trim).
 	trim := req.TrimStartSec
+	if ff, ok := conn.(firstFramer); ok {
+		first := ff.FirstFrameUnix()
+		t := trimFromFrameTime(req.EventUnix, first, trim)
+		log.Printf("recorder: trim planned=%ds camera-based=%ds (first frame=%d event=%d)", trim, t, first, req.EventUnix)
+		if t != trim {
+			if t > trim {
+				req.CaptureSec += t - trim
+			}
+			trim = t
+		}
+	} else {
+		log.Printf("recorder: conn %T has no frame-time info; using planned trim %ds", conn, trim)
+	}
 	finalDur := req.DurationSec
 	if finalDur <= 0 {
 		finalDur = r.cfg.DurationSec
@@ -224,6 +238,32 @@ const defaultFPS = 15.0
 // streamFPSer is implemented by conns that can measure the real frame rate
 // from the camera's frame timestamps (miss.Conn).
 type streamFPSer interface{ StreamFPS() float64 }
+
+// firstFramer is implemented by conns that know the camera-clock time of the
+// first streamed frame (miss.Conn).
+type firstFramer interface{ FirstFrameUnix() int64 }
+
+// maxTrimSec bounds a trim derived from camera timestamps.
+const maxTrimSec = 300
+
+// trimFromFrameTime returns how many seconds to cut from the start of the
+// stream so the clip begins exactly at the event on the camera's own clock
+// (the on-screen timestamp matches the cloud event time, as in the Mi Home
+// app). The seek's pre-roll only exists for keyframe sync and is cut away.
+// planned is used when the frame time is unknown or implausible.
+func trimFromFrameTime(eventUnix, firstFrame int64, planned int) int {
+	if firstFrame <= 0 || eventUnix <= 0 {
+		return planned
+	}
+	trim := int(eventUnix - firstFrame)
+	if trim < 0 {
+		return 0
+	}
+	if trim > maxTrimSec {
+		return planned
+	}
+	return trim
+}
 
 // sanitizeFPS rejects missing or implausible measured rates.
 func sanitizeFPS(fps float64) float64 {

@@ -183,7 +183,16 @@ func SelectTimeItemCandidates(segs []mtp.TimelineSeg, eventUnix int64, preRoll, 
 			eventUnix, len(segs), minS, maxS)
 	}
 
+	// Nearest start before the event first. Index durations are unreliable
+	// (live 2026-10-13: entries 60s apart all claimed dur=316 while the camera
+	// reported each real file as ~60s), and 0x10d ignores an offset beyond the
+	// real file length and plays from its start — so seeking the earliest
+	// covering entry landed minutes before the event. The nearest start keeps
+	// the offset smallest, hence inside the real file.
 	sort.SliceStable(covering, func(i, j int) bool {
+		if covering[i].StartUnix != covering[j].StartUnix {
+			return covering[i].StartUnix > covering[j].StartUnix
+		}
 		si, sj := absInt(covering[i].DurationSec-60), absInt(covering[j].DurationSec-60)
 		if si != sj {
 			return si < sj

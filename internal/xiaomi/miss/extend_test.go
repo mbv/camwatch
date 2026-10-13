@@ -48,3 +48,30 @@ func TestExtendPlanToRecordingEnd(t *testing.T) {
 		t.Fatalf("lone FinalDurSec=%d want 20", c.FinalDurSec)
 	}
 }
+
+// Live 2026-10-13: entries 60s apart all claimed dur=316 while the camera's
+// real files are ~60s. The earliest covering entry (start 656, offset 205 for
+// an event at 869) made the camera play from 656 — 213s before the event. The
+// entry starting closest before the event must be tried first.
+func TestCandidatesPreferNearestStartWhenIndexDurationsLie(t *testing.T) {
+	segs := []mtp.TimelineSeg{
+		{StartUnix: 1791888656, DurationSec: 316},
+		{StartUnix: 1791888716, DurationSec: 316},
+		{StartUnix: 1791888776, DurationSec: 316},
+		{StartUnix: 1791888836, DurationSec: 316},
+	}
+	const event = 1791888869
+	plans, err := SelectTimeItemCandidates(segs, event, 8, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plans[0].SessionID != 1791888836 {
+		t.Fatalf("first candidate sessionid=%d want 1791888836", plans[0].SessionID)
+	}
+	if want := int(event-1791888836) - plans[0].TrimStartSec; plans[0].OffsetSec != want {
+		t.Fatalf("offset=%d want %d", plans[0].OffsetSec, want)
+	}
+	if seg, _, ok := mtp.LookupTimeline(segs, event); !ok || seg.StartUnix != 1791888836 {
+		t.Fatalf("LookupTimeline picked %+v", seg)
+	}
+}

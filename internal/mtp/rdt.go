@@ -819,8 +819,14 @@ func LookupTimeline(segs []TimelineSeg, eventUnix int64) (TimelineSeg, int, bool
 			continue
 		}
 		score := absInt(s.DurationSec - 60)
-		// Prefer shorter spans on a tie (tighter match to a single SD minute).
-		if score < bestScore || (score == bestScore && bestIdx >= 0 && s.DurationSec < segs[bestIdx].DurationSec) {
+		// Nearest start first: index durations lie (see miss.SelectTimeItemCandidates),
+		// and the real file containing the event is the one starting closest
+		// before it. Then closest to 60s, then shorter.
+		better := bestIdx < 0 || s.StartUnix > segs[bestIdx].StartUnix
+		if !better && s.StartUnix == segs[bestIdx].StartUnix {
+			better = score < bestScore || (score == bestScore && s.DurationSec < segs[bestIdx].DurationSec)
+		}
+		if better {
 			bestScore = score
 			bestIdx = i
 		}
