@@ -51,6 +51,20 @@ type ClipCfg struct {
 	// MaxDurationSec caps a full-event clip (default 180). Guards cameras
 	// that record continuously, where the recording never "ends".
 	MaxDurationSec int `yaml:"max_duration_sec"`
+	// LeadSec: the clip starts this many seconds before the event (default 10,
+	// 0 = start at the event). Never starts after it.
+	LeadSec *int `yaml:"lead_sec"`
+}
+
+// Lead returns the lead-in seconds (default 10).
+func (c ClipCfg) Lead() int {
+	if c.LeadSec == nil {
+		return 10
+	}
+	if *c.LeadSec < 0 {
+		return 0
+	}
+	return *c.LeadSec
 }
 
 // FullEventEnabled reports whether full-event recording is on (default true).

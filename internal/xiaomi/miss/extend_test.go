@@ -21,7 +21,7 @@ func TestExtendPlanToRecordingEnd(t *testing.T) {
 	}
 	p := plans[0]
 
-	got := ExtendPlanToRecordingEnd(segs, p, 180)
+	got := ExtendPlanToRecordingEnd(segs, p, 180, 0)
 	if got.FinalDurSec != 140 { // 1140 - 1000
 		t.Fatalf("FinalDurSec=%d want 140", got.FinalDurSec)
 	}
@@ -30,21 +30,25 @@ func TestExtendPlanToRecordingEnd(t *testing.T) {
 	}
 
 	// Cap wins over a longer recording.
-	if c := ExtendPlanToRecordingEnd(segs, p, 60); c.FinalDurSec != 60 {
+	if c := ExtendPlanToRecordingEnd(segs, p, 60, 0); c.FinalDurSec != 60 {
 		t.Fatalf("capped FinalDurSec=%d want 60", c.FinalDurSec)
 	}
 	// Cap below the configured floor never shortens the clip.
-	if c := ExtendPlanToRecordingEnd(segs, p, 10); c.FinalDurSec != 20 {
+	if c := ExtendPlanToRecordingEnd(segs, p, 10, 0); c.FinalDurSec != 20 {
 		t.Fatalf("floor FinalDurSec=%d want 20", c.FinalDurSec)
 	}
 	// Disabled when max <= 0.
-	if c := ExtendPlanToRecordingEnd(segs, p, 0); c != p {
+	if c := ExtendPlanToRecordingEnd(segs, p, 0, 0); c != p {
 		t.Fatal("max=0 must not change the plan")
+	}
+	// Lead is added on top: clip = lead + (recording end - event).
+	if c := ExtendPlanToRecordingEnd(segs, p, 180, 10); c.FinalDurSec != 150 {
+		t.Fatalf("lead FinalDurSec=%d want 150", c.FinalDurSec)
 	}
 	// Short recording (nothing follows): keeps the default length.
 	lone := []mtp.TimelineSeg{{StartUnix: 960, DurationSec: 60}}
 	pl, _ := SelectTimeItemCandidates(lone, 1000, 8, 20)
-	if c := ExtendPlanToRecordingEnd(lone, pl[0], 180); c.FinalDurSec != 20 {
+	if c := ExtendPlanToRecordingEnd(lone, pl[0], 180, 0); c.FinalDurSec != 20 {
 		t.Fatalf("lone FinalDurSec=%d want 20", c.FinalDurSec)
 	}
 }

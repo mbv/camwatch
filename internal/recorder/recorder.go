@@ -24,8 +24,12 @@ type Config struct {
 	// picked an explicit window.
 	FullEvent      bool
 	MaxDurationSec int
-	FFmpeg         string
-	Clips          ports.ClipStore
+	// LeadSec: the clip starts this many seconds before the event, measured
+	// on the camera's clock (what the on-screen timestamp shows). The clip
+	// never starts after the event.
+	LeadSec int
+	FFmpeg  string
+	Clips   ports.ClipStore
 }
 
 type Recorder struct {
@@ -55,6 +59,7 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 	outMP4 := r.cfg.Clips.PathFor(ev)
 	rawPath := outMP4[:len(outMP4)-len(filepath.Ext(outMP4))] + ".es"
 
+	lead := r.cfg.LeadSec
 	req := &domain.PlaybackRequest{
 		EventUnix:   ev.SessionUnix(),
 		DurationSec: r.cfg.DurationSec,
@@ -69,10 +74,21 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 		// the small keyframe-sync default. No new PlaybackRequest fields needed.
 		req.PreRollSec = win.BeforeSec
 		req.DurationSec = win.BeforeSec + win.AfterSec
-	} else if r.cfg.FullEvent {
-		req.FullEvent = true
-		req.MaxDurationSec = r.cfg.MaxDurationSec
+		lead = win.BeforeSec
+	} else {
+		if lead > 0 {
+			// Seek a little earlier than the wanted start: the camera lands on
+			// a keyframe at or before the target, and the extra seconds are cut
+			// using the real frame time below.
+			req.PreRollSec = lead + keyframeSlackSec
+			req.DurationSec = lead + r.cfg.DurationSec
+		}
+		if r.cfg.FullEvent {
+			req.FullEvent = true
+			req.MaxDurationSec = r.cfg.MaxDurationSec
+		}
 	}
+	req.LeadSec = lead
 
 	rc, err := conn.DownloadPlayback(ctx, req)
 	if err != nil {
@@ -91,8 +107,8 @@ func (r *Recorder) CaptureEvent(ctx context.Context, conn ports.P2PConn, ev doma
 	trim := req.TrimStartSec
 	if ff, ok := conn.(firstFramer); ok {
 		first := ff.FirstFrameUnix()
-		t := trimFromFrameTime(req.EventUnix, first, trim)
-		log.Printf("recorder: trim planned=%ds camera-based=%ds (first frame=%d event=%d)", trim, t, first, req.EventUnix)
+		t := trimFromFrameTime(req.EventUnix-int64(lead), first, trim)
+		log.Printf("recorder: trim planned=%ds camera-based=%ds (first frame=%d event=%d lead=%ds)", trim, t, first, req.EventUnix, lead)
 		if t != trim {
 			if t > trim {
 				req.CaptureSec += t - trim
@@ -243,19 +259,22 @@ type streamFPSer interface{ StreamFPS() float64 }
 // first streamed frame (miss.Conn).
 type firstFramer interface{ FirstFrameUnix() int64 }
 
+// keyframeSlackSec is extra seek pre-roll so the first keyframe lands before
+// the wanted clip start.
+const keyframeSlackSec = 3
+
 // maxTrimSec bounds a trim derived from camera timestamps.
 const maxTrimSec = 300
 
 // trimFromFrameTime returns how many seconds to cut from the start of the
-// stream so the clip begins exactly at the event on the camera's own clock
-// (the on-screen timestamp matches the cloud event time, as in the Mi Home
-// app). The seek's pre-roll only exists for keyframe sync and is cut away.
-// planned is used when the frame time is unknown or implausible.
-func trimFromFrameTime(eventUnix, firstFrame int64, planned int) int {
-	if firstFrame <= 0 || eventUnix <= 0 {
+// stream so the clip begins at startUnix (event minus lead) on the camera's
+// own clock — the on-screen timestamp, which matches the cloud event time as in
+// the Mi Home app. planned is used when the frame time is unknown or implausible.
+func trimFromFrameTime(startUnix, firstFrame int64, planned int) int {
+	if firstFrame <= 0 || startUnix <= 0 {
 		return planned
 	}
-	trim := int(eventUnix - firstFrame)
+	trim := int(startUnix - firstFrame)
 	if trim < 0 {
 		return 0
 	}

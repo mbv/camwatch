@@ -354,9 +354,9 @@ func PlanPaddedSeek(segs []mtp.TimelineSeg, eventUnix int64, before, after int) 
 // (camera auto-advance, see PlanPaddedSeek), so only the capture budget grows.
 //
 // The result is never shorter than plan.FinalDurSec and never longer than
-// maxSec after the event (continuous-recording cameras would otherwise chain
+// leadSec + maxSec (maxSec counted from the event) (continuous-recording cameras would otherwise chain
 // forever). maxSec <= 0 leaves the plan untouched.
-func ExtendPlanToRecordingEnd(segs []mtp.TimelineSeg, plan SeekPlan, maxSec int) SeekPlan {
+func ExtendPlanToRecordingEnd(segs []mtp.TimelineSeg, plan SeekPlan, maxSec, leadSec int) SeekPlan {
 	if maxSec <= 0 || plan.EventUnix <= 0 {
 		return plan
 	}
@@ -373,7 +373,11 @@ func ExtendPlanToRecordingEnd(segs []mtp.TimelineSeg, plan SeekPlan, maxSec int)
 	if end > limit {
 		end = limit
 	}
-	full := int(end - plan.EventUnix)
+	if leadSec < 0 {
+		leadSec = 0
+	}
+	// Length of the clip: lead before the event plus the event itself.
+	full := int(end-plan.EventUnix) + leadSec
 	if full <= plan.FinalDurSec {
 		return plan
 	}

@@ -556,7 +556,7 @@ func (c *Conn) resolveSeekPlan(ctx context.Context, req domain.PlaybackRequest) 
 	}
 	if req.FullEvent {
 		for i := range plans {
-			ext := ExtendPlanToRecordingEnd(c.timeline, plans[i], req.MaxDurationSec)
+			ext := ExtendPlanToRecordingEnd(c.timeline, plans[i], req.MaxDurationSec, req.LeadSec)
 			if ext.FinalDurSec != plans[i].FinalDurSec {
 				mtp.Logp("miss: full event sessionid=%d clip %ds -> %ds (max %ds)\n",
 					ext.SessionID, plans[i].FinalDurSec, ext.FinalDurSec, req.MaxDurationSec)

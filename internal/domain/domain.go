@@ -92,6 +92,10 @@ type PlaybackRequest struct {
 	// end time), bounded by MaxDurationSec. DurationSec stays the floor.
 	FullEvent      bool
 	MaxDurationSec int
+	// LeadSec is how many seconds before the event the final clip starts
+	// (the clip is cut on the camera's own clock). Full-event extension adds
+	// it so the lead is not taken out of the event's own length.
+	LeadSec int
 }
 
 // ClipWindow is a user-chosen amount of context to include around an event

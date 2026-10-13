@@ -77,6 +77,7 @@ func main() {
 
 	rec := recorder.New(recorder.Config{
 		DurationSec:    cfg.Clip.DurationSec,
+		LeadSec:        cfg.Clip.Lead(),
 		FullEvent:      cfg.Clip.FullEventEnabled(),
 		MaxDurationSec: cfg.Clip.MaxDurationSec,
 		FFmpeg:         cfg.Clip.FFmpeg,
